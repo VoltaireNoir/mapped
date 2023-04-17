@@ -1,131 +1,56 @@
-pub mod pallete;
+pub mod palette;
 
 use ahash::AHashMap;
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
-use pallete::{ColorClass, Rgbx};
+use palette::{ColorClass, Rgbx};
 use std::{
     error::Error,
-    marker::PhantomData,
-    ops::Deref,
+    ops::{Deref, DerefMut},
     path::Path,
     sync::mpsc::{self, Receiver, Sender},
     thread,
-    time::Instant,
 };
 
 use rayon::prelude::*;
 
-pub struct Processor<'a, 'b, F, T = Unloaded>
+pub struct Processor<'a, 'b, 'c, M>
 where
-    F: AsRef<str>,
+    M: Mapper,
 {
-    file: F,
-    data: Option<DynamicImage>,
-    mapper: Box<dyn Mapper>,
-    output: Option<&'a Path>,
-    palette: &'b [Rgbx],
-    threads: Threads,
-    marker: PhantomData<T>,
-    progress: Option<Sender<Signal>>,
+    conf: &'c ProcOptions<'a, 'b, M>,
+    data: DynamicImage,
+    prog: SignalSender,
 }
 
-fn notify(sender: Option<&Sender<Signal>>) {
-    if let Some(s) = sender {
-        s.send(Signal).unwrap();
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Loaded;
-
-#[derive(Debug, Clone)]
-pub struct Unloaded;
-
-impl<'a, 'b, F, T> Processor<'a, 'b, F, T>
+impl<'a, 'b, 'c, M> Processor<'a, 'b, 'c, M>
 where
-    F: AsRef<str>,
-{
-    pub fn strategy(mut self, mapper: Box<dyn Mapper>) -> Self {
-        self.mapper = mapper;
-        self
-    }
-
-    pub fn output(mut self, output: &'a Path) -> Self {
-        self.output.replace(output);
-        self
-    }
-
-    pub fn palette(mut self, palette: &'b [Rgbx]) -> Self {
-        self.palette = palette;
-        self
-    }
-
-    pub fn threads(mut self, threads: Threads) -> Self {
-        self.threads = threads;
-        self
-    }
-}
-
-impl<'a, 'b, F> Processor<'a, 'b, F, Unloaded>
-where
-    F: AsRef<str>,
-{
-    pub fn new(file: F) -> Processor<'a, 'b, F> {
-        Processor {
-            file,
-            data: None,
-            mapper: Box::new(Nearest),
-            output: None,
-            palette: &pallete::NORD,
-            threads: Threads::Auto,
-            progress: None,
-            marker: PhantomData,
-        }
-    }
-
-    pub fn load(self) -> Result<Processor<'a, 'b, F, Loaded>, Box<dyn Error + 'static>> {
-        let img = image::open(self.file.as_ref())?;
-
-        Ok(Processor {
-            file: self.file,
-            data: Some(img),
-            mapper: self.mapper,
-            output: self.output,
-            palette: self.palette,
-            threads: self.threads,
-            marker: PhantomData,
-            progress: self.progress,
-        })
-    }
-
-    pub fn set_file(&mut self, file: F) {
-        self.file = file;
-    }
-}
-
-impl<F> Processor<'_, '_, F, Loaded>
-where
-    F: AsRef<str>,
+    M: Mapper,
 {
     pub fn process(&self) -> Result<(), Box<dyn Error + 'static>> {
         //TODO: write the rest of the function
-        let img_pixels: Vec<_> = self.image().pixels().map(|(_, _, rgb)| rgb).collect();
-        match self.threads {
-            Threads::Single => (),
-            Threads::Auto => (),
-            Threads::Custom(_) => (),
+        let img_pixels: Vec<_> = self.data.pixels().map(|(_, _, rgb)| rgb).collect();
+        let mapper = &self.conf.mapper;
+        match self.conf.threads {
+            Threads::Single => self.save(
+                &img_pixels
+                    .iter()
+                    .flat_map(|pixel| mapper.predict(self.conf.palette, &pixel.0))
+                    .collect::<Vec<u8>>(),
+            )?,
+            Threads::Auto => todo!(),
+            Threads::Custom(_) => todo!(),
             Threads::Rayon => self.save(
                 &img_pixels
                     .par_iter()
-                    .flat_map(|x| self.mapper.predict(self.palette, &x.0))
+                    .flat_map(|x| mapper.predict(self.conf.palette, &x.0))
                     .collect::<Vec<u8>>(),
             )?,
             Threads::Extreme => {
                 self.save(&dispatch_and_join2(
                     subdivide(&img_pixels, *ThreadCount::calculate()),
-                    self.palette,
-                    self.mapper.as_ref(),
-                    self.progress.as_ref(),
+                    self.conf.palette,
+                    &self.conf.mapper,
+                    &self.prog,
                 ))?;
             }
         }
@@ -134,9 +59,9 @@ where
 
     pub fn gen_tracker(&mut self) -> Tracker {
         let (s, r) = mpsc::channel::<Signal>();
-        let (x, y) = self.image().dimensions();
+        let (x, y) = self.data.dimensions();
 
-        self.progress.replace(s);
+        self.prog.replace(s);
 
         Tracker {
             current: 0,
@@ -145,15 +70,116 @@ where
         }
     }
 
-    fn image(&self) -> &DynamicImage {
-        self.data.as_ref().unwrap()
-    }
-
     fn save(&self, buf: &[u8]) -> Result<(), Box<dyn Error + 'static>> {
-        let out = self.output.unwrap_or("mapped.png".as_ref());
-        let (w, h) = self.image().dimensions();
+        let out = self.conf.output.unwrap_or("mapped.png".as_ref());
+        let (w, h) = self.data.dimensions();
         image::save_buffer(out, buf, w, h, image::ColorType::Rgba8)?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProcOptions<'a, 'b, M: Mapper> {
+    mapper: M,
+    output: Option<&'a Path>,
+    threads: Threads,
+    palette: &'b [Rgbx],
+}
+
+impl Default for ProcOptions<'_, '_, Nearest> {
+    fn default() -> Self {
+        ProcOptions {
+            mapper: Nearest,
+            output: None,
+            threads: Threads::default(),
+            palette: &crate::palette::NORD,
+        }
+    }
+}
+
+impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
+    pub fn new(mapper: M) -> Self {
+        ProcOptions {
+            mapper,
+            output: None,
+            threads: Threads::default(),
+            palette: &crate::palette::NORD,
+        }
+    }
+
+    pub fn swap_mapper<Map: Mapper>(self, mapper: Map) -> ProcOptions<'a, 'b, Map> {
+        ProcOptions {
+            mapper,
+            output: self.output,
+            threads: self.threads,
+            palette: self.palette,
+        }
+    }
+
+    pub fn copy_with_mapper<Map: Mapper>(&self, mapper: Map) -> ProcOptions<'a, 'b, Map> {
+        ProcOptions {
+            mapper,
+            output: self.output,
+            threads: self.threads,
+            palette: self.palette,
+        }
+    }
+
+    pub fn output(&mut self, out: &'a Path) -> &mut Self {
+        self.output = Some(out);
+        self
+    }
+
+    pub fn threads(&mut self, threads: Threads) -> &mut Self {
+        self.threads = threads;
+        self
+    }
+
+    pub fn palette(&mut self, palete: &'b [Rgbx]) -> &mut Self {
+        self.palette = palete;
+        self
+    }
+
+    pub fn load<F: AsRef<Path>>(
+        &'_ self,
+        file: F,
+    ) -> Result<Processor<'a, 'b, '_, M>, Box<dyn Error + 'static>> {
+        let data = image::open(file.as_ref())?;
+
+        Ok(Processor {
+            conf: self,
+            data,
+            prog: SignalSender::new(),
+        })
+    }
+}
+
+#[derive(Clone)]
+struct SignalSender(Option<Sender<Signal>>);
+
+impl SignalSender {
+    fn new() -> Self {
+        SignalSender(None)
+    }
+
+    fn notify(&self) {
+        if let Some(s) = &self.0 {
+            s.send(Signal).unwrap();
+        }
+    }
+}
+
+impl Deref for SignalSender {
+    type Target = Option<Sender<Signal>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SignalSender {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -164,12 +190,6 @@ pub struct Tracker {
 }
 
 struct Signal;
-
-impl From<Signal> for usize {
-    fn from(_: Signal) -> Self {
-        1
-    }
-}
 
 impl Tracker {
     pub fn percentage(&mut self) -> f32 {
@@ -184,7 +204,7 @@ impl Tracker {
         self.total
     }
     fn track(&mut self) {
-        self.current += self.receiver.try_iter().map(usize::from).sum::<usize>();
+        self.current += self.receiver.try_iter().count();
     }
 }
 
@@ -237,77 +257,22 @@ impl Default for ThreadCount {
     }
 }
 
-fn load_file(file: &str) -> DynamicImage {
-    image::open(file).expect("Failed to read file.")
-}
-
-fn save_file(raw_data: Vec<u8>, (w, h): (u32, u32), output: Option<&str>, input: &str) {
-    let newimg = RgbaImage::from_vec(w, h, raw_data).expect("failed to create new image");
-    if let Some(output) = output {
-        newimg.save(output).expect("Failed to save file");
-    } else {
-        let (name, _) = input.split_once('.').unwrap();
-        let output = format!("{}_nordified.png", name);
-        newimg.save(output).expect("Failed to save file");
-    };
-}
-
-pub fn nordify(file: impl AsRef<str>, output: Option<&str>, palette: &[Rgbx], mapper: &dyn Mapper) {
-    let img = load_file(file.as_ref());
-    let img_pixels: Vec<_> = img.pixels().map(|(_, _, rgb)| rgb).collect();
-
-    let n_parts: u8 = {
-        let c = num_cpus::get();
-        if c >= 4 {
-            (c / 2) as u8
-        } else {
-            1
-        }
-    };
-
-    save_file(
-        dispatch_and_join(subdivide(&img_pixels, n_parts), palette, mapper),
-        img.dimensions(),
-        output,
-        file.as_ref(),
-    );
-}
-
-fn dispatch_and_join(parts: Vec<&[Rgba<u8>]>, palette: &[Rgbx], mapper: &dyn Mapper) -> Vec<u8> {
-    thread::scope(|s| {
-        let mut handles: Vec<thread::ScopedJoinHandle<Vec<u8>>> = Vec::new();
-        let mut data: Vec<u8> = Vec::new();
-        for part in parts {
-            let h = s.spawn(|| {
-                part.iter()
-                    .flat_map(|rgb| mapper.predict(palette, &rgb.0))
-                    .collect::<Vec<u8>>()
-            });
-            handles.push(h);
-        }
-        for h in handles {
-            data.append(&mut h.join().unwrap());
-        }
-        data
-    })
-}
-
-fn dispatch_and_join2(
+fn dispatch_and_join2<M: Mapper>(
     parts: Vec<&[Rgba<u8>]>,
     palette: &[Rgbx],
-    mapper: &dyn Mapper,
-    progress: Option<&Sender<Signal>>,
+    mapper: &M,
+    progress: &SignalSender,
 ) -> Vec<u8> {
     thread::scope(|s| {
         let mut handles: Vec<thread::ScopedJoinHandle<Vec<u8>>> = Vec::new();
         let mut data: Vec<u8> = Vec::new();
         for part in parts {
-            let sender = progress.cloned();
+            let sender = progress.clone();
             let h = s.spawn(move || {
                 part.iter()
                     .flat_map(|rgb| {
                         let r = mapper.predict(palette, &rgb.0);
-                        notify(sender.as_ref());
+                        sender.notify();
                         r
                     })
                     .collect::<Vec<u8>>()
@@ -455,7 +420,7 @@ impl KNN {
 
 impl Mapper for KNN {
     fn predict(&self, palette: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4] {
-        let grp = KNN::classify(pixel, self.k, &pallete::SYN_DATA_SET, true, false);
+        let grp = KNN::classify(pixel, self.k, &palette::SYN_DATA_SET, true, false);
         let (i, _, _) = palette
             .iter()
             .enumerate()
@@ -466,13 +431,4 @@ impl Mapper for KNN {
 
         palette[i].rgba_array()
     }
-}
-
-// The closer the diff to 0 is, the more linearly distributed are the valued
-// Linearly distributed values tend to fall into blacks and greys
-// Higher diff indicates varied distribution, and may indicate that the color is closer to red green or blue
-// TODO: Apply diff if the distance of two candidates falls within a certain threshhold
-fn diff(color: Vec<u8>) -> i16 {
-    let (x, y, z) = (color[0] as i16, color[1] as i16, color[2] as i16);
-    (x - y) + (x - z)
 }
