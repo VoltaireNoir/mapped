@@ -1,10 +1,49 @@
 use std::cmp::Ordering;
 
+#[macro_export]
+macro_rules! rgbx {
+    ($r:expr, $g:expr, $b:expr) => {
+        Rgbx::new($r, $g, $b, ColorClass::Whites)
+    };
+
+    ($r:expr, $g:expr, $b:expr, w) => {
+        Rgbx::new($r, $g, $b, ColorClass::Whites)
+    };
+
+    ($r:expr, $g:expr, $b:expr, g) => {
+        Rgbx::new($r, $g, $b, ColorClass::Greys)
+    };
+
+    ($r:expr, $g:expr, $b:expr, b) => {
+        Rgbx::new($r, $g, $b, ColorClass::Blues)
+    };
+
+    ($r:expr, $g:expr, $b:expr, r) => {
+        Rgbx::new($r, $g, $b, ColorClass::Red)
+    };
+
+    ($r:expr, $g:expr, $b:expr, p) => {
+        Rgbx::new($r, $g, $b, ColorClass::Purple)
+    };
+
+    ($r:expr, $g:expr, $b:expr, g) => {
+        Rgbx::new($r, $g, $b, ColorClass::Green)
+    };
+
+    ($r:expr, $g:expr, $b:expr, y) => {
+        Rgbx::new($r, $g, $b, ColorClass::Yellow)
+    };
+
+    ($r:expr, $g:expr, $b:expr, o) => {
+        Rgbx::new($r, $g, $b, ColorClass::Yellow)
+    };
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Copy)]
-pub struct Rgbx(u8, u8, u8, ColorClass);
+pub struct Rgbx(pub u8, pub u8, pub u8, pub ColorClass);
 
 impl Rgbx {
-    pub fn new(red: u8, green: u8, blue: u8, class: ColorClass) -> Rgbx {
+    pub const fn new(red: u8, green: u8, blue: u8, class: ColorClass) -> Rgbx {
         Rgbx(red, green, blue, class)
     }
 
@@ -299,68 +338,3 @@ pub const DATA_SET: [Rgbx; 112] = [
     Rgbx(102, 255, 255, Blues),
     Rgbx(153, 255, 255, Blues),
 ];
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::KNN;
-    const BASIC_COLORS: [Rgbx; 14] = [
-        Rgbx(255, 0, 0, Red),
-        Rgbx(255, 0, 127, Red),
-        Rgbx(255, 128, 0, Orange),
-        Rgbx(255, 255, 0, Yellow),
-        Rgbx(128, 255, 0, Green),
-        Rgbx(0, 255, 0, Green),
-        Rgbx(0, 255, 128, Green),
-        Rgbx(0, 255, 255, Blues),
-        Rgbx(0, 128, 255, Blues),
-        Rgbx(0, 0, 255, Blues),
-        Rgbx(255, 0, 255, Purple),
-        Rgbx(128, 128, 128, Greys),
-        Rgbx(0, 0, 0, Greys),
-        Rgbx(255, 255, 255, Whites),
-    ];
-    #[test]
-    fn basic_color_accuracy() {
-        let acc = prediction_accuracy(&BASIC_COLORS, &SYN_DATA_SET, 30, true);
-        println!("Basic color prediction accuracy: {}%", acc);
-        assert!(acc > 95.0)
-    }
-
-    fn prediction_accuracy(sample: &[Rgbx], data_set: &[Rgbx], k: usize, print: bool) -> f32 {
-        let mut matches = 0;
-        for color in sample {
-            let grp = KNN::classify(&color.rgba_array(), k, data_set, true, false);
-            matches += if grp == color.3 {
-                1
-            } else {
-                if print {
-                    println!("Failed to predict: {:?}, prediction: {:?}", color, grp);
-                }
-                0
-            };
-        }
-        (matches as f32 / sample.len() as f32) * 100.0
-    }
-
-    #[test]
-    fn rgbx_equality() {
-        let x = Rgbx(255, 255, 255, ColorClass::Whites);
-        let y = x;
-        assert_eq!(x, y)
-    }
-
-    #[test]
-    fn rgbx_inequality() {
-        let x = Rgbx(255, 255, 255, ColorClass::Whites);
-        let y = Rgbx(255, 200, 0, ColorClass::Orange);
-        assert_ne!(x, y)
-    }
-
-    #[test]
-    fn gradient() {
-        let start = Rgbx(255, 204, 204, Blues);
-        let end = Rgbx(102, 0, 0, Blues);
-        let _g = start.gradient(&end, 10);
-    }
-}

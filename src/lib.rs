@@ -1,16 +1,17 @@
 pub mod mappers;
 pub mod palette;
+mod procutils;
 
-use image::{DynamicImage, GenericImageView, Rgba};
+use image::{DynamicImage, GenericImageView};
 use mappers::Nearest;
 use palette::Rgbx;
+use procutils::{dispatch_and_join, subdivide};
 
 use std::{
     error::Error,
     ops::{Deref, DerefMut},
     path::Path,
     sync::mpsc::{self, Receiver, Sender},
-    thread,
 };
 
 use rayon::prelude::*;
@@ -48,7 +49,7 @@ where
                     .collect::<Vec<u8>>(),
             )?,
             Threads::Extreme => {
-                self.save(&dispatch_and_join2(
+                self.save(&dispatch_and_join(
                     subdivide(&img_pixels, *ThreadCount::calculate()),
                     self.conf.palette,
                     &self.conf.mapper,
@@ -94,7 +95,7 @@ impl Default for ProcOptions<'_, '_, Nearest> {
             mapper: Nearest,
             output: None,
             threads: Threads::default(),
-            palette: &crate::palette::NORD,
+            palette: &palette::NORD,
         }
     }
 }
@@ -105,7 +106,7 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
             mapper,
             output: None,
             threads: Threads::default(),
-            palette: &crate::palette::NORD,
+            palette: &palette::NORD,
         }
     }
 
@@ -257,54 +258,6 @@ impl Default for ThreadCount {
     fn default() -> Self {
         Self(1)
     }
-}
-
-fn dispatch_and_join2<M: Mapper>(
-    parts: Vec<&[Rgba<u8>]>,
-    palette: &[Rgbx],
-    mapper: &M,
-    progress: &SignalSender,
-) -> Vec<u8> {
-    thread::scope(|s| {
-        let mut handles: Vec<thread::ScopedJoinHandle<Vec<u8>>> = Vec::new();
-        let mut data: Vec<u8> = Vec::new();
-        for part in parts {
-            let sender = progress.clone();
-            let h = s.spawn(move || {
-                part.iter()
-                    .flat_map(|rgb| {
-                        let r = mapper.predict(palette, &rgb.0);
-                        sender.notify();
-                        r
-                    })
-                    .collect::<Vec<u8>>()
-            });
-            handles.push(h);
-        }
-        for h in handles {
-            data.append(&mut h.join().unwrap());
-        }
-        data
-    })
-}
-
-fn subdivide<T>(pixels: &Vec<T>, times: u8) -> Vec<&[T]> {
-    let mut parts: Vec<&[T]> = Vec::new();
-    parts.push(pixels);
-    for _ in 0..times {
-        let len = parts.len();
-        for _ in 0..len {
-            split_and_push(parts.remove(0), &mut parts)
-        }
-    }
-    parts
-}
-
-fn split_and_push<'a, T>(sl: &'a [T], vec: &mut Vec<&'a [T]>) {
-    let mid = sl.len() / 2;
-    let (left, right) = sl.split_at(mid);
-    vec.push(left);
-    vec.push(right);
 }
 
 pub trait Mapper: Send + Sync {

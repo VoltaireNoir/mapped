@@ -46,19 +46,19 @@ impl Mapper for Creative {
     }
 }
 
-pub struct KNN {
+pub struct Knn {
     k: usize,
 }
 
-impl Default for KNN {
+impl Default for Knn {
     fn default() -> Self {
-        KNN { k: 12 }
+        Knn { k: 12 }
     }
 }
 
-impl KNN {
+impl Knn {
     pub fn with(k: usize) -> Self {
-        KNN { k }
+        Knn { k }
     }
     fn classify(
         c: &[u8; 4],
@@ -113,9 +113,9 @@ impl KNN {
     }
 }
 
-impl Mapper for KNN {
+impl Mapper for Knn {
     fn predict(&self, palette: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4] {
-        let grp = KNN::classify(pixel, self.k, &super::palette::SYN_DATA_SET, true, false);
+        let grp = Knn::classify(pixel, self.k, &super::palette::SYN_DATA_SET, true, false);
         let (i, _, _) = palette
             .iter()
             .enumerate()
@@ -125,5 +125,74 @@ impl Mapper for KNN {
             .unwrap();
 
         palette[i].rgba_array()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::palette::ColorClass::*;
+    use crate::palette::*;
+    use crate::rgbx;
+
+    const BASIC_COLORS: [Rgbx; 14] = [
+        rgbx!(255, 0, 0, r),
+        rgbx!(255, 0, 127, r),
+        rgbx!(255, 128, 0, o),
+        rgbx!(255, 255, 0, y),
+        rgbx!(128, 255, 0, g),
+        rgbx!(0, 255, 0, g),
+        rgbx!(0, 255, 128, g),
+        rgbx!(0, 255, 255, b),
+        rgbx!(0, 128, 255, b),
+        rgbx!(0, 0, 255, b),
+        rgbx!(255, 0, 255, p),
+        rgbx!(128, 128, 128, g),
+        rgbx!(0, 0, 0, g),
+        rgbx!(255, 255, 255, w),
+    ];
+
+    #[test]
+    fn basic_color_accuracy() {
+        let acc = prediction_accuracy(&BASIC_COLORS, &SYN_DATA_SET, 30, true);
+        println!("Basic color prediction accuracy: {}%", acc);
+        assert!(acc > 95.0)
+    }
+
+    fn prediction_accuracy(sample: &[Rgbx], data_set: &[Rgbx], k: usize, print: bool) -> f32 {
+        let mut matches = 0;
+        for color in sample {
+            let grp = Knn::classify(&color.rgba_array(), k, data_set, true, false);
+            matches += if grp == color.3 {
+                1
+            } else {
+                if print {
+                    println!("Failed to predict: {:?}, prediction: {:?}", color, grp);
+                }
+                0
+            };
+        }
+        (matches as f32 / sample.len() as f32) * 100.0
+    }
+
+    #[test]
+    fn rgbx_equality() {
+        let x = Rgbx(255, 255, 255, ColorClass::Whites);
+        let y = x;
+        assert_eq!(x, y)
+    }
+
+    #[test]
+    fn rgbx_inequality() {
+        let x = Rgbx(255, 255, 255, ColorClass::Whites);
+        let y = Rgbx(255, 200, 0, ColorClass::Orange);
+        assert_ne!(x, y)
+    }
+
+    #[test]
+    fn gradient() {
+        let start = Rgbx(255, 204, 204, Blues);
+        let end = Rgbx(102, 0, 0, Blues);
+        let _g = start.gradient(&end, 10);
     }
 }
