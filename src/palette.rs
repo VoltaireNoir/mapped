@@ -130,6 +130,21 @@ impl Rgbx {
     }
 }
 
+impl From<[u8; 4]> for Rgbx {
+    fn from(value: [u8; 4]) -> Self {
+        rgbx!(value[0], value[1], value[2])
+    }
+}
+
+pub fn find_closest(clrs: &[[u8; 4]], clr: &[u8; 4]) -> [u8; 4] {
+    let (_, clrtyp) = clrs
+        .iter()
+        .map(|color| (Rgbx::from(*color).manhattan_dist(clr), color))
+        .min_by_key(|(dist, _)| *dist)
+        .unwrap();
+    *clrtyp
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ColorClass {
     Blues,
@@ -221,6 +236,8 @@ pub const NORD: [Rgbx; 16] = [
     Rgbx(67, 76, 94, Greys),
     Rgbx(76, 86, 106, Greys),
 ];
+
+pub const BASECOLORS: [[u8; 4]; 139] = include!("basecolors");
 
 pub const SYN_DATA_SET: [Rgbx; 671] = include!("generated_data");
 

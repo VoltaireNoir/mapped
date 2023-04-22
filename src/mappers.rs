@@ -1,3 +1,5 @@
+use crate::palette;
+
 use super::{
     palette::{ColorClass, Rgbx},
     Mapper,
@@ -11,11 +13,26 @@ impl Mapper for Nearest {
         let pick = palette
             .iter()
             .enumerate()
-            .map(|(i, pal)| (i, pal.euclidian_dist(pixel)))
-            .min_by(|x, y| x.1.total_cmp(&y.1))
+            .map(|(i, pal)| (i, pal.manhattan_dist(pixel)))
+            .min_by_key(|(_, d)| *d)
             .unwrap();
 
         palette[pick.0].rgba_array()
+    }
+}
+
+pub struct NearestDoublePass;
+
+impl Mapper for NearestDoublePass {
+    fn predict(&self, palette: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4] {
+        let basic = palette::find_closest(&palette::BASECOLORS, pixel);
+        let (_, i) = palette
+            .iter()
+            .enumerate()
+            .map(|(i, pc)| (pc.manhattan_dist(&basic), i))
+            .min_by_key(|(d, _)| *d)
+            .unwrap();
+        palette[i].rgba_array()
     }
 }
 
@@ -125,6 +142,18 @@ impl Mapper for Knn {
             .unwrap();
 
         palette[i].rgba_array()
+    }
+}
+
+pub struct ManualMap;
+
+impl Mapper for ManualMap {
+    fn predict(&self, _: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4] {
+        match *pixel {
+            [100..=255, 0, 0, _] => palette::NORD[8].rgba_array(),
+            [185..=255, 0..=68, 0..=68, _] => palette::NORD[8].rgba_array(),
+            _ => *pixel,
+        }
     }
 }
 
