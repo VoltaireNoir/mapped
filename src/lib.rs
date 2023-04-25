@@ -5,7 +5,6 @@ mod procutils;
 use image::{DynamicImage, GenericImageView};
 use mappers::Nearest;
 use palette::Rgbx;
-use procutils::{dispatch_and_join, subdivide};
 
 use std::{
     error::Error,
@@ -16,41 +15,59 @@ use std::{
 
 use rayon::prelude::*;
 
-pub struct Processor<'a, 'b, 'c, M>
+pub struct Processor<'a, 'b, M>
 where
     M: Mapper,
 {
-    conf: &'c ProcOptions<'a, 'b, M>,
+    conf: &'a ProcOptions<'a, 'b, M>,
     data: DynamicImage,
     prog: SignalSender,
 }
 
-impl<'a, 'b, 'c, M> Processor<'a, 'b, 'c, M>
+impl<'a, 'b, M> Processor<'a, 'b, M>
 where
     M: Mapper,
 {
     pub fn process(&self) -> Result<(), Box<dyn Error + 'static>> {
-        //TODO: write the rest of the function
+        use procutils::{dispatch_and_join, subdivide};
+
         let img_pixels: Vec<_> = self.data.pixels().map(|(_, _, rgb)| rgb).collect();
-        let mapper = &self.conf.mapper;
-        match self.conf.threads {
+
+        let ProcOptions {
+            mapper,
+            threads,
+            palette,
+            ..
+        } = &*self.conf;
+
+        match threads {
             Threads::Single => self.save(
                 &img_pixels
                     .iter()
                     .flat_map(|pixel| mapper.predict(self.conf.palette, &pixel.0))
                     .collect::<Vec<u8>>(),
             )?,
-            Threads::Auto => todo!(),
-            Threads::Custom(_) => todo!(),
+            Threads::Auto => self.save(&dispatch_and_join(
+                img_pixels.chunks(*ThreadCount::calculate()).collect(),
+                palette,
+                mapper,
+                &self.prog,
+            ))?,
+            Threads::Custom(n) => self.save(&dispatch_and_join(
+                img_pixels.chunks(img_pixels.len() / **n).collect(),
+                palette,
+                mapper,
+                &self.prog,
+            ))?,
             Threads::Rayon => self.save(
                 &img_pixels
                     .par_iter()
-                    .flat_map(|x| mapper.predict(self.conf.palette, &x.0))
+                    .flat_map(|x| mapper.predict(palette, &x.0))
                     .collect::<Vec<u8>>(),
             )?,
             Threads::Extreme => {
                 self.save(&dispatch_and_join(
-                    subdivide(&img_pixels, *ThreadCount::calculate()),
+                    subdivide(&img_pixels, *ThreadCount::calculate() as u8),
                     self.conf.palette,
                     &self.conf.mapper,
                     &self.prog,
@@ -82,14 +99,14 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct ProcOptions<'a, 'b, M: Mapper> {
+pub struct ProcOptions<'a, 'b, M: Mapper = Nearest> {
     mapper: M,
     output: Option<&'a Path>,
     threads: Threads,
     palette: &'b [Rgbx],
 }
 
-impl Default for ProcOptions<'_, '_, Nearest> {
+impl Default for ProcOptions<'_, '_> {
     fn default() -> Self {
         ProcOptions {
             mapper: Nearest,
@@ -146,7 +163,7 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
     pub fn load<F: AsRef<Path>>(
         &'_ self,
         file: F,
-    ) -> Result<Processor<'a, 'b, '_, M>, Box<dyn Error + 'static>> {
+    ) -> Result<Processor<'_, 'b, M>, Box<dyn Error + 'static>> {
         let data = image::open(file.as_ref())?;
 
         Ok(Processor {
@@ -222,22 +239,18 @@ pub enum Threads {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ThreadCount(u8);
+pub struct ThreadCount(usize);
 
 impl ThreadCount {
-    pub fn new(val: u8) -> Result<Self, u8> {
-        if val % 2 == 0 && val != 0 {
-            Ok(Self(val))
-        } else {
-            Err(val)
-        }
+    pub fn new(val: usize) -> Self {
+        ThreadCount(val)
     }
 
     fn calculate() -> Self {
         if let Ok(c) = std::thread::available_parallelism() {
             let c = usize::from(c);
             if c >= 4 {
-                ThreadCount::new((c / 2) as u8).unwrap()
+                ThreadCount::new(c / 2)
             } else {
                 ThreadCount::default()
             }
@@ -248,7 +261,7 @@ impl ThreadCount {
 }
 
 impl Deref for ThreadCount {
-    type Target = u8;
+    type Target = usize;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -260,6 +273,6 @@ impl Default for ThreadCount {
     }
 }
 
-pub trait Mapper: Send + Sync {
+pub trait Mapper: Send + Sync + Clone {
     fn predict(&self, palette: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4];
 }

@@ -8,6 +8,7 @@ pub(crate) fn dispatch_and_join<M: Mapper>(
     mapper: &M,
     progress: &SignalSender,
 ) -> Vec<u8> {
+    // TODO: Try to optimize the code for better performance
     thread::scope(|s| {
         let mut handles: Vec<thread::ScopedJoinHandle<Vec<u8>>> = Vec::new();
         let mut data: Vec<u8> = Vec::new();

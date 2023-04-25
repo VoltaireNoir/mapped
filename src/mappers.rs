@@ -6,36 +6,34 @@ use super::{
 };
 use ahash::AHashMap;
 
+#[derive(Debug, Clone)]
 pub struct Nearest;
 
 impl Mapper for Nearest {
     fn predict(&self, palette: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4] {
-        let pick = palette
+        palette
             .iter()
-            .enumerate()
-            .map(|(i, pal)| (i, pal.manhattan_dist(pixel)))
-            .min_by_key(|(_, d)| *d)
-            .unwrap();
-
-        palette[pick.0].rgba_array()
+            .min_by_key(|pal| pal.manhattan_dist(pixel))
+            .unwrap()
+            .rgba_array()
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct NearestDoublePass;
 
 impl Mapper for NearestDoublePass {
     fn predict(&self, palette: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4] {
         let basic = palette::find_closest(&palette::BASECOLORS, pixel);
-        let (_, i) = palette
+        palette
             .iter()
-            .enumerate()
-            .map(|(i, pc)| (pc.manhattan_dist(&basic), i))
-            .min_by_key(|(d, _)| *d)
-            .unwrap();
-        palette[i].rgba_array()
+            .min_by_key(|pc| pc.manhattan_dist(&basic))
+            .unwrap()
+            .rgba_array()
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Creative;
 
 impl Mapper for Creative {
@@ -63,6 +61,7 @@ impl Mapper for Creative {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Knn {
     k: usize,
 }
@@ -145,6 +144,7 @@ impl Mapper for Knn {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ManualMap;
 
 impl Mapper for ManualMap {
