@@ -9,7 +9,7 @@ use palette::Rgbx;
 use std::{
     error::Error,
     ops::{Deref, DerefMut},
-    path::Path,
+    path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
 };
 
@@ -28,7 +28,7 @@ impl<'a, 'b, M> Processor<'a, 'b, M>
 where
     M: Mapper,
 {
-    pub fn process(&self) -> Result<(), Box<dyn Error + 'static>> {
+    pub fn process(&self) -> ProcessedData {
         use procutils::{dispatch_and_join, subdivide};
 
         let img_pixels: Vec<_> = self.data.pixels().map(|(_, _, rgb)| rgb).collect();
@@ -40,41 +40,44 @@ where
             ..
         } = &*self.conf;
 
-        match threads {
-            Threads::Single => self.save(
-                &img_pixels
-                    .iter()
-                    .flat_map(|pixel| mapper.predict(self.conf.palette, &pixel.0))
-                    .collect::<Vec<u8>>(),
-            )?,
-            Threads::Auto => self.save(&dispatch_and_join(
+        let raw: Vec<u8> = match threads {
+            Threads::Single => img_pixels
+                .iter()
+                .flat_map(|pixel| mapper.predict(self.conf.palette, &pixel.0))
+                .collect(),
+            Threads::Auto => dispatch_and_join(
                 img_pixels.chunks(*ThreadCount::calculate()).collect(),
                 palette,
                 mapper,
                 &self.prog,
-            ))?,
-            Threads::Custom(n) => self.save(&dispatch_and_join(
+            ),
+            Threads::Custom(n) => dispatch_and_join(
                 img_pixels.chunks(img_pixels.len() / **n).collect(),
                 palette,
                 mapper,
                 &self.prog,
-            ))?,
-            Threads::Rayon => self.save(
-                &img_pixels
-                    .par_iter()
-                    .flat_map(|x| mapper.predict(palette, &x.0))
-                    .collect::<Vec<u8>>(),
-            )?,
-            Threads::Extreme => {
-                self.save(&dispatch_and_join(
-                    subdivide(&img_pixels, *ThreadCount::calculate() as u8),
-                    self.conf.palette,
-                    &self.conf.mapper,
-                    &self.prog,
-                ))?;
-            }
+            ),
+            Threads::Rayon => img_pixels
+                .par_iter()
+                .flat_map(|x| mapper.predict(palette, &x.0))
+                .collect(),
+            Threads::Extreme => dispatch_and_join(
+                subdivide(&img_pixels, *ThreadCount::calculate() as u8),
+                self.conf.palette,
+                &self.conf.mapper,
+                &self.prog,
+            ),
+        };
+
+        ProcessedData {
+            raw,
+            out: self
+                .conf
+                .output
+                .and_then(|p| Some(p.to_path_buf()))
+                .or(None),
+            dimen: self.data.dimensions(),
         }
-        Ok(())
     }
 
     pub fn gen_tracker(&mut self) -> Tracker {
@@ -89,11 +92,32 @@ where
             receiver: r,
         }
     }
+}
 
-    fn save(&self, buf: &[u8]) -> Result<(), Box<dyn Error + 'static>> {
-        let out = self.conf.output.unwrap_or("mapped.png".as_ref());
-        let (w, h) = self.data.dimensions();
-        image::save_buffer(out, buf, w, h, image::ColorType::Rgba8)?;
+pub struct ProcessedData {
+    raw: Vec<u8>,
+    out: Option<PathBuf>,
+    dimen: (u32, u32),
+}
+
+impl ProcessedData {
+    pub fn raw_buffer(&self) -> &[u8] {
+        &self.raw
+    }
+
+    pub fn save(&self) -> Result<(), Box<dyn Error + 'static>> {
+        let output = if let Some(out) = &self.out {
+            out.as_path()
+        } else {
+            "mapped.png".as_ref()
+        };
+        self.save_to(output)
+    }
+
+    pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error + 'static>> {
+        let (w, h) = self.dimen;
+        image::save_buffer(path, &self.raw, w, h, image::ColorType::Rgba8)?;
+
         Ok(())
     }
 }
@@ -145,8 +169,8 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
         }
     }
 
-    pub fn output(&mut self, out: &'a Path) -> &mut Self {
-        self.output = Some(out);
+    pub fn output<P: AsRef<Path> + ?Sized>(&mut self, out: &'a P) -> &mut Self {
+        self.output = Some(out.as_ref());
         self
     }
 
