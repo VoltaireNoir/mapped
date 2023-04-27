@@ -1,9 +1,11 @@
 pub mod mappers;
+pub mod memoize;
 pub mod palette;
 mod procutils;
 
 use image::{DynamicImage, GenericImageView};
 use mappers::Nearest;
+use memoize::Memoized;
 use palette::Rgbx;
 
 use std::{
@@ -299,4 +301,7 @@ impl Default for ThreadCount {
 
 pub trait Mapper: Send + Sync + Clone {
     fn predict(&self, palette: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4];
+    fn memoized(self) -> Memoized<Self> {
+        self.into()
+    }
 }
