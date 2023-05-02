@@ -22,7 +22,7 @@ pub struct Processor<'a, 'b, M>
 where
     M: Mapper,
 {
-    conf: &'a ProcOptions<'a, 'b, M>,
+    conf: ProcOptions<'a, 'b, M>,
     data: DynamicImage,
     prog: Progress,
 }
@@ -41,7 +41,7 @@ where
             threads,
             palette,
             ..
-        } = self.conf;
+        } = &self.conf;
 
         let raw: Vec<u8> = match threads {
             Threads::Single => img_pixels
@@ -82,7 +82,7 @@ where
     fn dispatch(&self, parts: Vec<&[Rgba<u8>]>) -> Vec<u8> {
         let ProcOptions {
             mapper, palette, ..
-        } = self.conf;
+        } = &self.conf;
 
         thread::scope(|s| {
             let mut handles: Vec<thread::ScopedJoinHandle<Vec<u8>>> = Vec::new();
@@ -156,6 +156,7 @@ impl Default for ProcOptions<'_, '_> {
 }
 
 impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
+    #[must_use]
     pub fn new(mapper: M) -> Self {
         ProcOptions {
             mapper,
@@ -165,7 +166,8 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
         }
     }
 
-    pub fn swap_mapper<Map: Mapper>(self, mapper: Map) -> ProcOptions<'a, 'b, Map> {
+    #[must_use]
+    pub fn mapper<Map: Mapper>(self, mapper: Map) -> ProcOptions<'a, 'b, Map> {
         ProcOptions {
             mapper,
             output: self.output,
@@ -174,6 +176,7 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
         }
     }
 
+    #[must_use]
     pub fn copy_with_mapper<Map: Mapper>(&self, mapper: Map) -> ProcOptions<'a, 'b, Map> {
         ProcOptions {
             mapper,
@@ -183,25 +186,28 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
         }
     }
 
-    pub fn output<P: AsRef<Path> + ?Sized>(&mut self, out: &'a P) -> &mut Self {
+    #[must_use]
+    pub fn output<P: AsRef<Path> + ?Sized>(mut self, out: &'a P) -> Self {
         self.output = Some(out.as_ref());
         self
     }
 
-    pub fn threads(&mut self, threads: Threads) -> &mut Self {
+    #[must_use]
+    pub fn threads(mut self, threads: Threads) -> Self {
         self.threads = threads;
         self
     }
 
-    pub fn palette(&mut self, palete: &'b [Rgbx]) -> &mut Self {
+    #[must_use]
+    pub fn palette(mut self, palete: &'b [Rgbx]) -> Self {
         self.palette = palete;
         self
     }
 
     pub fn load<F: AsRef<Path>>(
-        &'_ self,
+        self,
         file: F,
-    ) -> Result<Processor<'_, 'b, M>, Box<dyn Error + 'static>> {
+    ) -> Result<Processor<'a, 'b, M>, Box<dyn Error + 'static>> {
         let data = image::open(file.as_ref())?;
 
         Ok(Processor {
