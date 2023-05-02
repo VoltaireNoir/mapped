@@ -24,7 +24,7 @@ where
 {
     conf: &'a ProcOptions<'a, 'b, M>,
     data: DynamicImage,
-    prog: SignalSender,
+    prog: Progress,
 }
 
 impl<'a, 'b, M> Processor<'a, 'b, M>
@@ -75,16 +75,8 @@ where
     }
 
     pub fn gen_tracker(&mut self) -> Tracker {
-        let (s, r) = mpsc::channel::<Signal>();
         let (x, y) = self.data.dimensions();
-
-        self.prog.replace(s);
-
-        Tracker {
-            current: 0,
-            total: (x * y) as usize,
-            receiver: r,
-        }
+        self.prog.init((x * y) as usize)
     }
 
     fn dispatch(&self, parts: Vec<&[Rgba<u8>]>) -> Vec<u8> {
@@ -96,7 +88,7 @@ where
             let mut handles: Vec<thread::ScopedJoinHandle<Vec<u8>>> = Vec::new();
             let mut data: Vec<u8> = Vec::new();
             for part in parts {
-                let sender = self.prog.clone();
+                let sender = self.prog.get_sender();
                 let h = s.spawn(move || {
                     part.iter()
                         .flat_map(|rgb| {
@@ -215,23 +207,45 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
         Ok(Processor {
             conf: self,
             data,
-            prog: SignalSender::new(),
+            prog: Progress::default(),
         })
     }
 }
+
+#[derive(Clone, Default)]
+struct Progress(SignalSender);
+
+impl Progress {
+    fn init(&mut self, size: usize) -> Tracker {
+        let (s, r) = mpsc::channel::<Signal>();
+        self.0.replace(s);
+        Tracker {
+            current: 0,
+            total: size,
+            receiver: r,
+        }
+    }
+    fn get_sender(&self) -> SignalSender {
+        self.0.clone()
+    }
+}
+
+unsafe impl Sync for Progress {}
 
 #[derive(Clone)]
 struct SignalSender(Option<Sender<Signal>>);
 
 impl SignalSender {
-    fn new() -> Self {
-        SignalSender(None)
-    }
-
     fn notify(&self) {
         if let Some(s) = &self.0 {
             s.send(Signal).unwrap();
         }
+    }
+}
+
+impl Default for SignalSender {
+    fn default() -> Self {
+        Self(None)
     }
 }
 
