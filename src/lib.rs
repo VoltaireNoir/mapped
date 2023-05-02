@@ -3,7 +3,7 @@ pub mod memoize;
 pub mod palette;
 mod procutils;
 
-use image::{DynamicImage, GenericImageView};
+use image::{DynamicImage, GenericImageView, Rgba};
 use mappers::Nearest;
 use memoize::Memoized;
 use palette::Rgbx;
@@ -13,6 +13,7 @@ use std::{
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
+    thread,
 };
 
 use rayon::prelude::*;
@@ -31,7 +32,7 @@ where
     M: Mapper,
 {
     pub fn process(&self) -> ProcessedData {
-        use procutils::{dispatch_and_join, subdivide};
+        use procutils::subdivide;
 
         let img_pixels: Vec<_> = self.data.pixels().map(|(_, _, rgb)| rgb).collect();
 
@@ -47,30 +48,19 @@ where
                 .iter()
                 .flat_map(|pixel| mapper.predict(palette, &pixel.0))
                 .collect(),
-            Threads::Auto => dispatch_and_join(
+            Threads::Auto => self.dispatch(
                 img_pixels
                     .chunks(img_pixels.len() / *ThreadCount::calculate())
                     .collect(),
-                palette,
-                mapper,
-                &self.prog,
             ),
-            Threads::Custom(n) => dispatch_and_join(
-                img_pixels.chunks(img_pixels.len() / **n).collect(),
-                palette,
-                mapper,
-                &self.prog,
-            ),
+            Threads::Custom(n) => {
+                self.dispatch(img_pixels.chunks(img_pixels.len() / **n).collect())
+            }
             Threads::Rayon => img_pixels
                 .par_iter()
                 .flat_map(|x| mapper.predict(palette, &x.0))
                 .collect(),
-            Threads::Extreme => dispatch_and_join(
-                subdivide(&img_pixels, *ThreadCount::calculate() as u8),
-                palette,
-                mapper,
-                &self.prog,
-            ),
+            Threads::Extreme => self.dispatch(subdivide(&img_pixels, *ThreadCount::calculate())),
         };
 
         ProcessedData {
@@ -95,6 +85,34 @@ where
             total: (x * y) as usize,
             receiver: r,
         }
+    }
+
+    fn dispatch(&self, parts: Vec<&[Rgba<u8>]>) -> Vec<u8> {
+        let ProcOptions {
+            mapper, palette, ..
+        } = self.conf;
+
+        thread::scope(|s| {
+            let mut handles: Vec<thread::ScopedJoinHandle<Vec<u8>>> = Vec::new();
+            let mut data: Vec<u8> = Vec::new();
+            for part in parts {
+                let sender = self.prog.clone();
+                let h = s.spawn(move || {
+                    part.iter()
+                        .flat_map(|rgb| {
+                            let r = mapper.predict(palette, &rgb.0);
+                            sender.notify();
+                            r
+                        })
+                        .collect::<Vec<u8>>()
+                });
+                handles.push(h);
+            }
+            for h in handles {
+                data.append(&mut h.join().unwrap());
+            }
+            data
+        })
     }
 }
 
