@@ -76,6 +76,7 @@ impl Knn {
     pub fn with(k: usize) -> Self {
         Knn { k }
     }
+
     fn classify(
         c: &[u8; 4],
         k: usize,
@@ -148,10 +149,10 @@ impl Mapper for Knn {
 pub struct ManualMap;
 
 impl Mapper for ManualMap {
-    fn predict(&self, _: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4] {
+    fn predict(&self, palette: &[Rgbx], pixel: &[u8; 4]) -> [u8; 4] {
         match *pixel {
-            [100..=255, 0, 0, _] => palette::NORD[8].rgba_array(),
-            [185..=255, 0..=68, 0..=68, _] => palette::NORD[8].rgba_array(),
+            [100..=255, 0, 0, _] => palette[8].rgba_array(),
+            [185..=255, 0..=68, 0..=68, _] => palette[8].rgba_array(),
             _ => *pixel,
         }
     }

@@ -40,15 +40,17 @@ where
             threads,
             palette,
             ..
-        } = &*self.conf;
+        } = self.conf;
 
         let raw: Vec<u8> = match threads {
             Threads::Single => img_pixels
                 .iter()
-                .flat_map(|pixel| mapper.predict(self.conf.palette, &pixel.0))
+                .flat_map(|pixel| mapper.predict(palette, &pixel.0))
                 .collect(),
             Threads::Auto => dispatch_and_join(
-                img_pixels.chunks(*ThreadCount::calculate()).collect(),
+                img_pixels
+                    .chunks(img_pixels.len() / *ThreadCount::calculate())
+                    .collect(),
                 palette,
                 mapper,
                 &self.prog,
@@ -65,8 +67,8 @@ where
                 .collect(),
             Threads::Extreme => dispatch_and_join(
                 subdivide(&img_pixels, *ThreadCount::calculate() as u8),
-                self.conf.palette,
-                &self.conf.mapper,
+                palette,
+                mapper,
                 &self.prog,
             ),
         };
