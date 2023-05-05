@@ -1,7 +1,6 @@
 pub mod mappers;
 pub mod memoize;
 pub mod palette;
-mod procutils;
 
 use image::{DynamicImage, GenericImageView, Rgba};
 use mappers::Nearest;
@@ -33,8 +32,6 @@ where
     M: Mapper,
 {
     pub fn process(&self) -> ProcessedData {
-        use procutils::subdivide;
-
         let img_pixels: Vec<_> = self.data.pixels().map(|(_, _, rgb)| rgb).collect();
 
         let ProcOptions {
@@ -51,17 +48,21 @@ where
                 .collect(),
             Threads::Auto => self.dispatch(
                 img_pixels
-                    .chunks(img_pixels.len() / *ThreadCount::calculate())
+                    .chunks(img_pixels.len() / ThreadCount::calculate().get())
                     .collect(),
             ),
             Threads::Custom(n) => {
-                self.dispatch(img_pixels.chunks(img_pixels.len() / **n).collect())
+                self.dispatch(img_pixels.chunks(img_pixels.len() / n.get()).collect())
             }
             Threads::Rayon => img_pixels
                 .par_iter()
                 .flat_map(|x| mapper.predict(palette, &x.0))
                 .collect(),
-            Threads::Extreme => self.dispatch(subdivide(&img_pixels, *ThreadCount::calculate())),
+            Threads::Extreme => self.dispatch(
+                img_pixels
+                    .chunks(img_pixels.len() / ThreadCount::extreme().get())
+                    .collect(),
+            ),
         };
 
         ProcessedData {
