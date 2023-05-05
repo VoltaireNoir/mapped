@@ -10,6 +10,7 @@ use palette::Rgbx;
 
 use std::{
     error::Error,
+    num::NonZeroUsize,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
@@ -305,37 +306,41 @@ pub enum Threads {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ThreadCount(usize);
+pub struct ThreadCount(NonZeroUsize);
 
 impl ThreadCount {
-    pub fn new(val: usize) -> Self {
+    pub fn new(val: NonZeroUsize) -> Self {
         ThreadCount(val)
     }
 
-    fn calculate() -> Self {
+    pub fn calculate() -> Self {
         if let Ok(c) = std::thread::available_parallelism() {
-            let c = usize::from(c);
-            if c >= 4 {
-                ThreadCount::new(c / 2)
-            } else {
-                ThreadCount::default()
-            }
+            ThreadCount::new(c)
         } else {
             ThreadCount::default()
         }
     }
+
+    fn extreme() -> Self {
+        NonZeroUsize::new(2usize.pow((Self::calculate().get() / 2) as u32))
+            .unwrap()
+            .into()
+    }
+
+    fn get(&self) -> usize {
+        self.0.get()
+    }
 }
 
-impl Deref for ThreadCount {
-    type Target = usize;
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl From<NonZeroUsize> for ThreadCount {
+    fn from(value: NonZeroUsize) -> Self {
+        Self(value)
     }
 }
 
 impl Default for ThreadCount {
     fn default() -> Self {
-        Self(1)
+        Self(NonZeroUsize::new(2).unwrap())
     }
 }
 
