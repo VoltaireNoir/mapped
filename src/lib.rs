@@ -69,11 +69,7 @@ where
 
         ProcessedData {
             raw,
-            out: self
-                .conf
-                .output
-                .and_then(|p| Some(p.to_path_buf()))
-                .or(None),
+            out: self.conf.output.and_then(|p| Some(p.to_path_buf())),
             dimen: self.data.dimensions(),
         }
     }
