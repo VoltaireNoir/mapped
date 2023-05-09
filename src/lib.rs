@@ -203,8 +203,8 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
     }
 
     #[must_use]
-    pub fn palette(mut self, palete: &'b [Rgbx]) -> Self {
-        self.palette = palete;
+    pub fn palette(mut self, palette: &'b [Rgbx]) -> Self {
+        self.palette = palette;
         self
     }
 
