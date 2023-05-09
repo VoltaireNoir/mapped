@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 pub mod mappers;
 pub mod memoize;
 pub mod palette;
