@@ -216,6 +216,19 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
             prog: Progress::default(),
         })
     }
+
+    pub fn load_bytes(
+        self,
+        buffer: &[u8],
+    ) -> Result<Processor<'a, 'b, M>, Box<dyn Error + 'static>> {
+        let data = image::load_from_memory(buffer)?;
+
+        Ok(Processor {
+            conf: self,
+            data,
+            prog: Progress::default(),
+        })
+    }
 }
 
 #[derive(Clone, Default)]
