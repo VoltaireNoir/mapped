@@ -11,6 +11,7 @@ use palette::Rgbx;
 
 use std::{
     error::Error,
+    io::{Seek, Write},
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
@@ -119,6 +120,10 @@ impl ProcessedData {
         &self.raw
     }
 
+    pub fn buffer_len(&self) -> usize {
+        self.raw.len()
+    }
+
     pub fn save(&self) -> Result<(), Box<dyn Error + 'static>> {
         let output = if let Some(out) = &self.out {
             out.as_path()
@@ -134,6 +139,33 @@ impl ProcessedData {
 
         Ok(())
     }
+
+    pub fn encode<Buf: Write + Seek>(
+        &self,
+        buf: &mut Buf,
+        encoding: Encoding,
+    ) -> Result<(), Box<dyn Error>> {
+        let format = match encoding {
+            Encoding::Png => image::ImageOutputFormat::Png,
+            Encoding::Jpeg(q) => image::ImageOutputFormat::Jpeg(q),
+        };
+        let (height, width) = self.dimen;
+
+        image::write_buffer_with_format(
+            buf,
+            self.raw_buffer(),
+            height,
+            width,
+            image::ColorType::Rgba8,
+            format,
+        )?;
+        Ok(())
+    }
+}
+
+pub enum Encoding {
+    Png,
+    Jpeg(u8),
 }
 
 #[derive(Debug, Clone)]
