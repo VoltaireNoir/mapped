@@ -34,6 +34,10 @@ impl<'a, 'b, M> Processor<'a, 'b, M>
 where
     M: Mapper,
 {
+    pub fn configure() -> ProcOptions<'a, 'b> {
+        ProcOptions::default()
+    }
+
     pub fn process(&self) -> ProcessedData {
         let img_pixels: Vec<_> = self.data.pixels().map(|(_, _, rgb)| rgb).collect();
 
