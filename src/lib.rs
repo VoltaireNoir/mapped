@@ -70,7 +70,7 @@ where
 
         ProcessedData {
             raw,
-            out: self.conf.output.and_then(|p| Some(p.to_path_buf())),
+            out: self.conf.output.map(|p| p.to_path_buf()),
             dimen: self.data.dimensions(),
         }
     }
@@ -283,7 +283,7 @@ impl Progress {
 
 unsafe impl Sync for Progress {}
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct SignalSender(Option<Sender<Signal>>);
 
 impl SignalSender {
@@ -291,12 +291,6 @@ impl SignalSender {
         if let Some(s) = &self.0 {
             s.send(Signal).unwrap();
         }
-    }
-}
-
-impl Default for SignalSender {
-    fn default() -> Self {
-        Self(None)
     }
 }
 
