@@ -14,27 +14,27 @@ use std::{
     io::{Seek, Write},
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
-    path::{Path, PathBuf},
+    path::Path,
     sync::mpsc::{self, Receiver, Sender},
     thread,
 };
 
 use rayon::prelude::*;
 
-pub struct Processor<'a, 'b, M>
+pub struct Processor<'a, M>
 where
     M: Mapper,
 {
-    conf: ProcOptions<'a, 'b, M>,
+    conf: ProcOptions<'a, M>,
     data: DynamicImage,
     prog: Progress,
 }
 
-impl<'a, 'b, M> Processor<'a, 'b, M>
+impl<'a, M> Processor<'a, M>
 where
     M: Mapper,
 {
-    pub fn configure() -> ProcOptions<'a, 'b> {
+    pub fn configure() -> ProcOptions<'a> {
         ProcOptions::default()
     }
 
@@ -74,7 +74,6 @@ where
 
         ProcessedData {
             raw,
-            out: self.conf.output.map(|p| p.to_path_buf()),
             dimen: self.data.dimensions(),
         }
     }
@@ -115,7 +114,6 @@ where
 
 pub struct ProcessedData {
     raw: Vec<u8>,
-    out: Option<PathBuf>,
     dimen: (u32, u32),
 }
 
@@ -128,16 +126,7 @@ impl ProcessedData {
         self.raw.len()
     }
 
-    pub fn save(&self) -> Result<(), Box<dyn Error + 'static>> {
-        let output = if let Some(out) = &self.out {
-            out.as_path()
-        } else {
-            "mapped.png".as_ref()
-        };
-        self.save_to(output)
-    }
-
-    pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error + 'static>> {
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error + 'static>> {
         let (w, h) = self.dimen;
         image::save_buffer(path, &self.raw, w, h, image::ColorType::Rgba8)?;
 
@@ -173,59 +162,48 @@ pub enum Encoding {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProcOptions<'a, 'b, M: Mapper = Nearest> {
+pub struct ProcOptions<'a, M: Mapper = Nearest> {
     mapper: M,
-    output: Option<&'a Path>,
     threads: Threads,
-    palette: &'b [Rgbx],
+    palette: &'a [Rgbx],
 }
 
-impl Default for ProcOptions<'_, '_> {
+impl Default for ProcOptions<'_> {
     fn default() -> Self {
         ProcOptions {
             mapper: Nearest,
-            output: None,
             threads: Threads::default(),
             palette: &palette::NORD,
         }
     }
 }
 
-impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
+impl<'a, M: Mapper> ProcOptions<'a, M> {
     #[must_use]
     pub fn new(mapper: M) -> Self {
         ProcOptions {
             mapper,
-            output: None,
             threads: Threads::default(),
             palette: &palette::NORD,
         }
     }
 
     #[must_use]
-    pub fn mapper<Map: Mapper>(self, mapper: Map) -> ProcOptions<'a, 'b, Map> {
+    pub fn mapper<Map: Mapper>(self, mapper: Map) -> ProcOptions<'a, Map> {
         ProcOptions {
             mapper,
-            output: self.output,
             threads: self.threads,
             palette: self.palette,
         }
     }
 
     #[must_use]
-    pub fn copy_with_mapper<Map: Mapper>(&self, mapper: Map) -> ProcOptions<'a, 'b, Map> {
+    pub fn copy_with_mapper<Map: Mapper>(&self, mapper: Map) -> ProcOptions<'a, Map> {
         ProcOptions {
             mapper,
-            output: self.output,
             threads: self.threads,
             palette: self.palette,
         }
-    }
-
-    #[must_use]
-    pub fn output<P: AsRef<Path> + ?Sized>(mut self, out: &'a P) -> Self {
-        self.output = Some(out.as_ref());
-        self
     }
 
     #[must_use]
@@ -235,7 +213,7 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
     }
 
     #[must_use]
-    pub fn palette(mut self, palette: &'b [Rgbx]) -> Self {
+    pub fn palette(mut self, palette: &'a [Rgbx]) -> Self {
         self.palette = palette;
         self
     }
@@ -243,7 +221,7 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
     pub fn load<F: AsRef<Path>>(
         self,
         file: F,
-    ) -> Result<Processor<'a, 'b, M>, Box<dyn Error + 'static>> {
+    ) -> Result<Processor<'a, M>, Box<dyn Error + 'static>> {
         let data = image::open(file.as_ref())?;
 
         Ok(Processor {
@@ -253,10 +231,7 @@ impl<'a, 'b, M: Mapper> ProcOptions<'a, 'b, M> {
         })
     }
 
-    pub fn load_bytes(
-        self,
-        buffer: &[u8],
-    ) -> Result<Processor<'a, 'b, M>, Box<dyn Error + 'static>> {
+    pub fn load_bytes(self, buffer: &[u8]) -> Result<Processor<'a, M>, Box<dyn Error + 'static>> {
         let data = image::load_from_memory(buffer)?;
 
         Ok(Processor {
